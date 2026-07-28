@@ -84,9 +84,27 @@ def supplier_article(item: OrderItem) -> str:
     return ""
 
 
+def supplier_delivery_data(item: OrderItem) -> tuple[str, str]:
+    warehouse = item.warehouse_snapshot or {}
+    product = item.product_snapshot or {}
+    info = warehouse.get("supplier_info") or product.get("supplier_info") or {}
+    original = info.get("original_data") or warehouse.get("original_data") or {}
+    sources = [info, original, warehouse, product]
+    for key in ("arrival_date", "delivery_date", "date_delivery", "eta", "arrivalDate", "deliveryDate"):
+        for source in sources:
+            if source.get(key) is not None and str(source[key]).strip():
+                return str(source[key]).strip(), ""
+    for key in ("delivery_period", "delivery_time", "delivery_term", "term", "period"):
+        for source in sources:
+            if source.get(key) is not None and str(source[key]).strip():
+                return "", str(source[key]).strip()
+    return "", ""
+
+
 def serialize_order_item(item: OrderItem) -> dict:
     product = item.product_snapshot or {}
     images = product.get("images") if isinstance(product.get("images"), list) else []
+    delivery_date, delivery_term = supplier_delivery_data(item)
     return {
         "id": item.id,
         "product_id": item.product_id,
@@ -103,6 +121,11 @@ def serialize_order_item(item: OrderItem) -> dict:
         "total": money(item.price) * item.quantity,
         "return_type": item.return_type,
         "fail_percent": money(item.fail_percent),
+        "delivery_date": delivery_date,
+        "delivery_term": delivery_term,
+        "currency": item.currency,
+        "created_at": item.created_at,
+        "updated_at": item.updated_at,
     }
 
 
@@ -224,14 +247,21 @@ async def update_order_status(session: AsyncSession, order_id: int, next_status:
     return await get_order(session, order_id)
 
 
-async def list_users(session: AsyncSession, search: str | None) -> list[dict]:
+async def list_users(
+    session: AsyncSession,
+    search: str | None,
+    enabled: bool | None = None,
+    has_orders: bool | None = None,
+) -> list[dict]:
     query = select(User).options(selectinload(User.profile), selectinload(User.auths).selectinload(UserAuth.provider))
     if search:
-        pattern = f"%{search.strip()}%"
         query = (
             query.outerjoin(UserProfile)
             .outerjoin(UserAuth)
-            .where(
+        )
+        for term in search.split():
+            pattern = f"%{term}%"
+            query = query.where(
                 or_(
                     UserProfile.first_name.ilike(pattern),
                     UserProfile.last_name.ilike(pattern),
@@ -241,8 +271,12 @@ async def list_users(session: AsyncSession, search: str | None) -> list[dict]:
                     UserAuth.subject.ilike(pattern),
                 )
             )
-        )
-    result = await session.execute(query.order_by(desc(User.created_at)).limit(200))
+    if enabled is not None:
+        query = query.where(User.enable.is_(enabled))
+    if has_orders is not None:
+        orders_exists = select(Order.id).where(Order.user_id == User.id).exists()
+        query = query.where(orders_exists if has_orders else ~orders_exists)
+    result = await session.execute(query.order_by(desc(User.created_at)))
     users = result.scalars().unique().all()
     stats_result = await session.execute(
         select(

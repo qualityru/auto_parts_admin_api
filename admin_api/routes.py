@@ -78,10 +78,12 @@ async def update_order_status(
 @router.get("/users")
 async def list_users(
     search: str | None = None,
+    enabled: bool | None = None,
+    has_orders: bool | None = None,
     session: AsyncSession = Depends(get_session),
     admin=Depends(require_admin),
 ):
-    return await admin_service.list_users(session, search)
+    return await admin_service.list_users(session, search, enabled, has_orders)
 
 
 @router.get("/users/{user_id}")
