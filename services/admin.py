@@ -8,6 +8,7 @@ from sqlalchemy.orm import selectinload
 from config import settings
 from models import Order, OrderItem, OrderStatus, User, UserAuth, UserProfile
 from services.broker import publish_event
+from schemas import UserProfileUpdateRequest
 
 
 ACTIVE_STATUSES = {
@@ -264,6 +265,32 @@ async def get_user(session: AsyncSession, user_id: int) -> dict:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     orders = await user_orders(session, user_id)
     return serialize_user(user, len(orders), sum(order["total_amount"] for order in orders)) | {"orders": orders}
+
+
+async def update_user_profile(
+    session: AsyncSession, user_id: int, payload: UserProfileUpdateRequest
+) -> dict:
+    user = await session.scalar(
+        select(User)
+        .options(selectinload(User.profile))
+        .where(User.id == user_id)
+    )
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    profile = user.profile
+    if not profile:
+        profile = UserProfile(user_id=user.id)
+        user.profile = profile
+        session.add(profile)
+
+    profile.first_name = payload.first_name
+    profile.last_name = payload.last_name
+    profile.middle_name = payload.middle_name
+    profile.phone = payload.phone
+    profile.delivery_address = payload.delivery_address
+    await session.commit()
+    return await get_user(session, user_id)
 
 
 async def user_orders(session: AsyncSession, user_id: int) -> list[dict]:

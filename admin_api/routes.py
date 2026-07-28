@@ -4,7 +4,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import settings
 from core.security import create_admin_token, require_admin
 from database import get_session
-from schemas import LoginRequest, LoginResponse, StatusUpdateRequest
+from schemas import (
+    LoginRequest,
+    LoginResponse,
+    StatusUpdateRequest,
+    UserProfileUpdateRequest,
+)
 from services import admin as admin_service
 
 router = APIRouter()
@@ -86,6 +91,16 @@ async def get_user(
     admin=Depends(require_admin),
 ):
     return await admin_service.get_user(session, user_id)
+
+
+@router.patch("/users/{user_id}")
+async def update_user(
+    user_id: int,
+    payload: UserProfileUpdateRequest,
+    session: AsyncSession = Depends(get_session),
+    admin=Depends(require_admin),
+):
+    return await admin_service.update_user_profile(session, user_id, payload)
 
 
 @router.get("/users/{user_id}/orders")
